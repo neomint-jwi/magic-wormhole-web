@@ -11,3 +11,5 @@ static/particles.js
 
 # Bun lockfile (optional, can include if you want reproducible builds)
 # bun.lockb
+
+.claude/

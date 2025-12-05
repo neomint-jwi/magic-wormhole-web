@@ -1,7 +1,110 @@
-// src/app.ts
-var THEME_KEY = "wormhole-theme";
-var TEXT_MAX_LENGTH = 1e4;
+// src/utils.ts
+function escapeHtml(text) {
+  const htmlEscapes = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  };
+  return text.replace(/[&<>"']/g, (char) => htmlEscapes[char] ?? char);
+}
+function formatBytes(bytes) {
+  if (bytes === 0) {
+    return "0 B";
+  }
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const size = sizes[i];
+  if (size === undefined) {
+    return "0 B";
+  }
+  return String(parseFloat((bytes / Math.pow(k, i)).toFixed(1))) + " " + size;
+}
 var ENCRYPTION_MARKER = "WORMHOLE_ENCRYPTED_V1:";
+function isEncryptedText(text) {
+  return text?.startsWith(ENCRYPTION_MARKER) ?? false;
+}
+var TEXT_MAX_LENGTH = 1e4;
+var THEME_KEY = "wormhole-theme";
+
+// src/crypto.ts
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder;
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits", "deriveKey"]);
+  return crypto.subtle.deriveKey({
+    name: "PBKDF2",
+    salt: salt.buffer,
+    iterations: 1e5,
+    hash: "SHA-256"
+  }, keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function encryptData(data, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(password, salt);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv.buffer }, key, data.buffer);
+  const result = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
+  result.set(salt, 0);
+  result.set(iv, salt.length);
+  result.set(new Uint8Array(encrypted), salt.length + iv.length);
+  return result;
+}
+async function decryptData(encryptedData, password) {
+  const salt = encryptedData.slice(0, 16);
+  const iv = encryptedData.slice(16, 28);
+  const data = encryptedData.slice(28);
+  const key = await deriveKey(password, salt);
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv.buffer }, key, data.buffer);
+  return new Uint8Array(decrypted);
+}
+async function encryptText(text, password) {
+  const enc = new TextEncoder;
+  const encrypted = await encryptData(enc.encode(text), password);
+  return ENCRYPTION_MARKER + btoa(String.fromCharCode(...encrypted));
+}
+async function decryptText(encryptedText, password) {
+  if (!encryptedText.startsWith(ENCRYPTION_MARKER)) {
+    throw new Error("Not encrypted");
+  }
+  const base64 = encryptedText.slice(ENCRYPTION_MARKER.length);
+  const encrypted = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const decrypted = await decryptData(encrypted, password);
+  return new TextDecoder().decode(decrypted);
+}
+async function encryptFile(file, password) {
+  const arrayBuffer = await file.arrayBuffer();
+  const encrypted = await encryptData(new Uint8Array(arrayBuffer), password);
+  const metadata = { name: file.name, type: file.type };
+  const metaBytes = new TextEncoder().encode(JSON.stringify(metadata));
+  const metaLen = new Uint32Array([metaBytes.length]);
+  const result = new Uint8Array(4 + metaBytes.length + encrypted.length);
+  result.set(new Uint8Array(metaLen.buffer), 0);
+  result.set(metaBytes, 4);
+  result.set(encrypted, 4 + metaBytes.length);
+  return new File([result.buffer], file.name + ".encrypted", {
+    type: "application/octet-stream"
+  });
+}
+async function decryptFile(encryptedFile, password) {
+  const arrayBuffer = await encryptedFile.arrayBuffer();
+  const data = new Uint8Array(arrayBuffer);
+  const metaLenArray = new Uint32Array(data.slice(0, 4).buffer);
+  const metaLen = metaLenArray[0];
+  if (metaLen === undefined) {
+    throw new Error("Invalid encrypted file format");
+  }
+  const metaBytes = data.slice(4, 4 + metaLen);
+  const metadata = JSON.parse(new TextDecoder().decode(metaBytes));
+  const encrypted = data.slice(4 + metaLen);
+  const decrypted = await decryptData(encrypted, password);
+  return new File([decrypted.buffer], metadata.name, {
+    type: metadata.type
+  });
+}
+
+// src/app.ts
 var STATUS = {
   IDLE: "idle",
   FILES_SELECTED: "files-selected",
@@ -63,24 +166,6 @@ var activeWebSocket = null;
 function $(id) {
   return document.getElementById(id);
 }
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-function formatBytes(bytes) {
-  if (bytes === 0) {
-    return "0 B";
-  }
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  const size = sizes[i];
-  if (size === undefined) {
-    return "0 B";
-  }
-  return String(parseFloat((bytes / Math.pow(k, i)).toFixed(1))) + " " + size;
-}
 function getPreferredTheme() {
   const stored = localStorage.getItem(THEME_KEY);
   if (stored === "dark" || stored === "light") {
@@ -97,75 +182,6 @@ function toggleTheme() {
   setTheme(current === "dark" ? "light" : "dark");
 }
 setTheme(getPreferredTheme());
-async function deriveKey(password, salt) {
-  const enc = new TextEncoder;
-  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits", "deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: salt.buffer, iterations: 1e5, hash: "SHA-256" }, keyMaterial, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-}
-async function encryptData(data, password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(password, salt);
-  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv.buffer }, key, data.buffer);
-  const result = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
-  result.set(salt, 0);
-  result.set(iv, salt.length);
-  result.set(new Uint8Array(encrypted), salt.length + iv.length);
-  return result;
-}
-async function decryptData(encryptedData, password) {
-  const salt = encryptedData.slice(0, 16);
-  const iv = encryptedData.slice(16, 28);
-  const data = encryptedData.slice(28);
-  const key = await deriveKey(password, salt);
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv.buffer }, key, data.buffer);
-  return new Uint8Array(decrypted);
-}
-async function encryptText(text, password) {
-  const enc = new TextEncoder;
-  const encrypted = await encryptData(enc.encode(text), password);
-  return ENCRYPTION_MARKER + btoa(String.fromCharCode(...encrypted));
-}
-async function decryptText(encryptedText, password) {
-  if (!encryptedText.startsWith(ENCRYPTION_MARKER)) {
-    throw new Error("Not encrypted");
-  }
-  const base64 = encryptedText.slice(ENCRYPTION_MARKER.length);
-  const encrypted = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-  const decrypted = await decryptData(encrypted, password);
-  return new TextDecoder().decode(decrypted);
-}
-async function encryptFile(file, password) {
-  const arrayBuffer = await file.arrayBuffer();
-  const encrypted = await encryptData(new Uint8Array(arrayBuffer), password);
-  const metadata = { name: file.name, type: file.type };
-  const metaBytes = new TextEncoder().encode(JSON.stringify(metadata));
-  const metaLen = new Uint32Array([metaBytes.length]);
-  const result = new Uint8Array(4 + metaBytes.length + encrypted.length);
-  result.set(new Uint8Array(metaLen.buffer), 0);
-  result.set(metaBytes, 4);
-  result.set(encrypted, 4 + metaBytes.length);
-  return new File([result.buffer], file.name + ".encrypted", {
-    type: "application/octet-stream"
-  });
-}
-async function decryptFile(encryptedFile, password) {
-  const arrayBuffer = await encryptedFile.arrayBuffer();
-  const data = new Uint8Array(arrayBuffer);
-  const metaLenArray = new Uint32Array(data.slice(0, 4).buffer);
-  const metaLen = metaLenArray[0];
-  if (metaLen === undefined) {
-    throw new Error("Invalid encrypted file format");
-  }
-  const metaBytes = data.slice(4, 4 + metaLen);
-  const metadata = JSON.parse(new TextDecoder().decode(metaBytes));
-  const encrypted = data.slice(4 + metaLen);
-  const decrypted = await decryptData(encrypted, password);
-  return new File([decrypted.buffer], metadata.name, { type: metadata.type });
-}
-function isEncryptedText(text) {
-  return text?.startsWith(ENCRYPTION_MARKER) ?? false;
-}
 function setSendState(updates, skipRender = false) {
   state.send = { ...state.send, ...updates };
   if (!skipRender) {
