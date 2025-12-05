@@ -1,2 +1,13 @@
+# Go binary
 wormhole-web
 *.exe
+
+# Dependencies
+node_modules/
+
+# Build artifacts (TypeScript compiles to static/)
+static/app.js
+static/particles.js
+
+# Bun lockfile (optional, can include if you want reproducible builds)
+# bun.lockb
