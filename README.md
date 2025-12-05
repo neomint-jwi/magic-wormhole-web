@@ -1,4 +1,3 @@
-# Fork
 # Wormhole Web
 
 A modern web UI for [Magic Wormhole](https://magic-wormhole.readthedocs.io/) file transfers, built with Go and vanilla JavaScript. Send files, folders, and encrypted messages between devices using simple wormhole codes.
