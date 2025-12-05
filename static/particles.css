@@ -1,0 +1,44 @@
+/**
+ * Particle Animation System - Styles
+ * Flowing particles that morph into shapes
+ *
+ * Required CSS variables (provide your own or use defaults):
+ *   --particle-color: Default particle color
+ *   --particle-success: Success/checkmark color
+ *   --particle-error: Error/X color
+ */
+
+/* Default CSS variables - override these in your app */
+:root {
+  --particle-color: #2563eb;
+  --particle-success: #16a34a;
+  --particle-error: #ef4444;
+}
+
+/* Container for particle animation */
+.particle-container {
+  position: relative;
+  width: 80px;
+  height: 60px;
+}
+
+/* Individual particle */
+.particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: var(--particle-color);
+  border-radius: 50%;
+  opacity: 0.6;
+  will-change: transform, opacity;
+}
+
+/* Success state modifier */
+.particle-container.success .particle {
+  background: var(--particle-success);
+}
+
+/* Error state modifier */
+.particle-container.error .particle {
+  background: var(--particle-error);
+}

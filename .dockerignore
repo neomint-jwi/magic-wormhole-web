@@ -1,0 +1,6 @@
+wormhole-web
+*.exe
+.git
+.gitignore
+README.md
+docker-compose.yml
