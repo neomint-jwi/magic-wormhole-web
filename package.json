@@ -1,0 +1,24 @@
+{
+  "name": "magic-wormhole-web",
+  "version": "1.0.0",
+  "description": "Web UI for Magic Wormhole file transfers",
+  "type": "module",
+  "scripts": {
+    "build": "bun run typecheck && bun run lint && bun build src/app.ts src/particles.ts --outdir=static --target=browser",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "watch": "bun build src/app.ts src/particles.ts --outdir=static --target=browser --watch",
+    "clean": "rm -rf static/*.js"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/bun": "^1.1.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.0.0"
+  },
+  "license": "MIT"
+}
